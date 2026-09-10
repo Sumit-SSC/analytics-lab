@@ -1,6 +1,12 @@
 {
   "version": 2,
   "rewrites": [
+    {"source": "/stats", "destination": "/stats.html"},
+    {"source": "/stats.html", "destination": "/stats.html"},
+    {"source": "/api/stats", "destination": "/api/stats.js"},
+    {"source": "/api/search", "destination": "/api/search.js"},
+    {"source": "/api/jobs", "destination": "/api/jobs.js"},
+    {"source": "/api/health", "destination": "/api/health.js"},
     {"source": "/jobs", "destination": "/pages/jobs.html"},
     {"source": "/playground", "destination": "/pages/playground.html"},
     {"source": "/resources", "destination": "/pages/resources.html"},
