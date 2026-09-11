@@ -2,7 +2,7 @@
   "version": 2,
   "crons": [
     {
-      "path": "/api/cron-keepalive",
+      "path": "/api/cron",
       "schedule": "*/5 * * * *"
     }
   ],
@@ -14,6 +14,7 @@
     {"source": "/api/jobs", "destination": "/api/jobs.js"},
     {"source": "/api/health", "destination": "/api/health.js"},
     {"source": "/api/cron-keepalive", "destination": "/api/cron-keepalive.js"},
+    {"source": "/api/cron", "destination": "/api/cron.js"},
     {"source": "/jobs", "destination": "/pages/jobs.html"},
     {"source": "/playground", "destination": "/pages/playground.html"},
     {"source": "/resources", "destination": "/pages/resources.html"},
