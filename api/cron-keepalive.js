@@ -75,7 +75,10 @@ export default async function handler(req) {
   // Operational Window Active (06:00 AM - 12:00 AM IST) -> Perform Keep-Alive Pings!
   console.log(`🌅 [ACTIVE_KEEP_ALIVE] Pinging Service 1 (Koyeb) and Service 2 (Render) at ${nowISTStr} IST...`);
 
-  const s1Url = process.env.SERVICE_1_URL || 'https://typical-diana-mitsu96-df9a3fcc.koyeb.app/api/health';
+  const s1Urls = [
+    process.env.SERVICE_1_URL || 'https://typical-diana-mitsu96-df9a3fcc.koyeb.app/health',
+    'https://typical-diana-mitsu96-df9a3fcc.koyeb.app/api/health'
+  ];
   const s2Urls = [
     process.env.SERVICE_2_URL || 'https://job-search-api-go.onrender.com/health',
     'https://tg-jobs-engine.onrender.com/health'
@@ -85,12 +88,19 @@ export default async function handler(req) {
   let s1Latency = 0;
   const s1Start = Date.now();
 
-  try {
-    const resp1 = await fetch(s1Url, { method: 'GET', headers: { 'User-Agent': 'Vercel-KeepAlive-Cron/1.0' } });
-    s1Latency = Date.now() - s1Start;
-    s1Status = resp1.ok ? `HTTP ${resp1.status} (${s1Latency}ms)` : `HTTP ${resp1.status}`;
-  } catch (err1) {
-    s1Status = `ERROR: ${err1.message}`;
+  for (const s1Url of s1Urls) {
+    try {
+      const resp1 = await fetch(s1Url, { method: 'GET', headers: { 'User-Agent': 'Vercel-KeepAlive-Cron/1.0' } });
+      s1Latency = Date.now() - s1Start;
+      if (resp1.ok) {
+        s1Status = `HTTP ${resp1.status} (${s1Latency}ms) via ${s1Url}`;
+        break;
+      } else {
+        s1Status = `HTTP ${resp1.status} via ${s1Url}`;
+      }
+    } catch (err1) {
+      s1Status = `ERROR: ${err1.message}`;
+    }
   }
 
   let s2Status = 'UNKNOWN';
