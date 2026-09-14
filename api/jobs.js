@@ -120,6 +120,7 @@ export default async function handler(req, res) {
     if (jobs.length > 0) {
       return res.status(200).json({
         success: true,
+        test_flag: "v999",
         totalInDb: totalCount || jobs.length,
         total: jobs.length,
         offset: skipOffset,
@@ -162,6 +163,7 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     success: true,
+    test_flag: "v999",
     totalInDb: totalCount || 0,
     total: 0,
     offset: skipOffset,
