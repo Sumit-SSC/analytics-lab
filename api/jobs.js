@@ -15,7 +15,8 @@ function httpsPost(urlStr, headers, bodyObj) {
       headers: {
         ...headers,
         'Content-Length': Buffer.byteLength(postData)
-      }
+      },
+      timeout: 8000
     }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
@@ -27,6 +28,7 @@ function httpsPost(urlStr, headers, bodyObj) {
         }
       });
     });
+    req.on('timeout', () => { req.destroy(new Error('Turso HTTPS POST Timeout (8s)')); });
     req.on('error', reject);
     req.write(postData);
     req.end();
@@ -35,7 +37,7 @@ function httpsPost(urlStr, headers, bodyObj) {
 
 function httpsGet(urlStr, headers = {}) {
   return new Promise((resolve, reject) => {
-    const req = https.get(urlStr, { headers }, (res) => {
+    const req = https.get(urlStr, { headers, timeout: 8000 }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
@@ -46,6 +48,7 @@ function httpsGet(urlStr, headers = {}) {
         }
       });
     });
+    req.on('timeout', () => { req.destroy(new Error('Render HTTPS GET Timeout (8s)')); });
     req.on('error', reject);
   });
 }
@@ -98,8 +101,9 @@ export default async function handler(req, res) {
   const maxLimit = Math.min(parseInt(limit, 10) || 60, 500);
   const skipOffset = Math.max(parseInt(offset, 10) || 0, 0);
 
-  let primaryError = null;
-  let countError = null;
+  let primaryError = '';
+  let countError = '';
+  let fallbackError = '';
   let jobs = [];
   let totalCount = 0;
 
@@ -110,7 +114,7 @@ export default async function handler(req, res) {
         totalCount = Number(countRes.rows[0].cnt) || 0;
       }
     } catch (cntErr) {
-      countError = cntErr.message;
+      countError = String(cntErr.message || cntErr);
     }
 
     let sql = `SELECT id, id as hash, title, company, location, COALESCE(description, '') as description, url, source, COALESCE(tags, '') as role_category, COALESCE(match_score, 0) as score, COALESCE(date, '') as created_at FROM unified_jobs WHERE 1=1`;
@@ -164,7 +168,7 @@ export default async function handler(req, res) {
       });
     }
   } catch (dbError) {
-    primaryError = dbError.stack || dbError.message;
+    primaryError = String(dbError.stack || dbError.message || dbError);
     console.warn("Turso DB Primary err:", dbError);
   }
 
@@ -182,21 +186,24 @@ export default async function handler(req, res) {
         totalInDb: totalDb || jobsList.length,
         total: jobsList.length,
         offset: skipOffset,
-        primary_error: primaryError,
-        count_error: countError,
+        primary_error: primaryError || undefined,
+        count_error: countError || undefined,
         fallback: 'render-go',
         jobs: jobsList,
       });
     }
-  } catch (fallbackErr) {}
+  } catch (fallbackErr) {
+    fallbackError = String(fallbackErr.message || fallbackErr);
+  }
 
   return res.status(200).json({
     success: true,
     totalInDb: totalCount || 0,
     total: 0,
     offset: skipOffset,
-    primary_error: primaryError,
-    count_error: countError,
+    primary_error: primaryError || 'No primary error reported',
+    count_error: countError || 'No count error reported',
+    fallback_error: fallbackError || 'No fallback error reported',
     jobs: [],
   });
 }
