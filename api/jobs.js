@@ -120,7 +120,7 @@ export default async function handler(req, res) {
     if (jobs.length > 0) {
       return res.status(200).json({
         success: true,
-        version: 'v2.1-direct-turso',
+        version: 'v2.2-turso-ok',
         totalInDb: totalCount || jobs.length,
         total: jobs.length,
         offset: skipOffset,
@@ -145,12 +145,12 @@ export default async function handler(req, res) {
       if (jobsList.length > 0) {
         return res.status(200).json({
           success: true,
-          version: 'v2.1-render-fallback',
+          version: 'v2.2-render-fallback',
           totalInDb: totalDb || jobsList.length,
           total: jobsList.length,
           offset: skipOffset,
-          primary_error: primaryError || undefined,
-          count_error: countError || undefined,
+          primary_error: primaryError || 'None',
+          count_error: countError || 'None',
           fallback: 'render-go',
           jobs: jobsList.map(j => ({
             id: j.id,
@@ -176,13 +176,13 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     success: true,
-    version: 'v2.1-empty',
+    version: 'v2.2-diag-empty',
     totalInDb: totalCount || 0,
     total: 0,
     offset: skipOffset,
-    primary_error: primaryError || 'No primary error reported',
-    count_error: countError || 'No count error reported',
-    fallback_error: fallbackError || 'No fallback error reported',
+    primary_error: primaryError || 'None',
+    count_error: countError || 'None',
+    fallback_error: fallbackError || 'None',
     jobs: [],
   });
 }
