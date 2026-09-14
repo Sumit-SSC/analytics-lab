@@ -62,9 +62,10 @@ export default async function handler(req, res) {
 
   let primaryError = null;
   let countError = null;
+  let jobs = [];
+  let totalCount = 0;
 
   try {
-    let totalCount = 0;
     try {
       const countRes = await queryTurso('SELECT COUNT(1) as cnt FROM unified_jobs');
       if (countRes.rows && countRes.rows.length > 0) {
@@ -101,7 +102,7 @@ export default async function handler(req, res) {
       );
     }
 
-    const jobs = (result.rows || []).map(row => ({
+    jobs = (result.rows || []).map(row => ({
       id: row.id,
       hash: row.hash || row.id,
       title: row.title,
@@ -115,20 +116,21 @@ export default async function handler(req, res) {
       created_at: row.created_at,
     }));
 
-    return res.status(200).json({
-      success: true,
-      totalInDb: totalCount || jobs.length,
-      total: jobs.length,
-      offset: skipOffset,
-      count_error: countError || undefined,
-      jobs: jobs,
-    });
+    if (jobs.length > 0) {
+      return res.status(200).json({
+        success: true,
+        totalInDb: totalCount || jobs.length,
+        total: jobs.length,
+        offset: skipOffset,
+        jobs: jobs,
+      });
+    }
   } catch (dbError) {
     primaryError = dbError.stack || dbError.message;
     console.warn("Turso DB Primary err:", dbError);
   }
 
-  // Fallback to Render Go API
+  // Fallback to Render Go API when Turso returns 0 jobs or errors out
   try {
     const fallbackResp = await fetch('https://job-search-api-go.onrender.com/jobs?limit=' + maxLimit, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
@@ -144,6 +146,7 @@ export default async function handler(req, res) {
         total: jobsList.length,
         offset: skipOffset,
         primary_error: primaryError,
+        count_error: countError,
         fallback: 'render-go',
         jobs: jobsList,
       });
@@ -152,7 +155,7 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     success: true,
-    totalInDb: 0,
+    totalInDb: totalCount || 0,
     total: 0,
     offset: skipOffset,
     primary_error: primaryError,
