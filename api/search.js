@@ -1,15 +1,28 @@
-const TURSO_URL = 'https://jobs-db-mitsu.aws-ap-south-1.turso.io/v2/pipeline';
-const TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODcyOTA3NDUsImlkIjoiMDE5ZjhlZjUtN2MwMS03OTNhLWI4NWEtYmRkYzUxZjM1Mzk2Iiwia2lkIjoiNmNlY282ZndLZEdseG9IMzJ0ZU1Oc1hEX3gxU0xCQXMtQzZHYW1YTFZCUSIsInJpZCI6IjhiY2Q3YjQ2LWIwZDEtNDEzNC05YjMyLTZkM2MxYzdkNmU3NSJ9.7JgajPE4xibTALh94uAPyDpHs_Un_V0CZq4EzrF7o5rrtpWk1_xT2qoU0omyBVnrYT7I85h2oJxEjzKZuo3sDw';
+const DEFAULT_TURSO_URL = 'https://jobs-db-mitsu.aws-ap-south-1.turso.io/v2/pipeline';
+const DEFAULT_TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODcyOTA3NDUsImlkIjoiMDE5ZjhlZjUtN2MwMS03OTNhLWI4NWEtYmRkYzUxZjM1Mzk2Iiwia2lkIjoiNmNlY282ZndLZEdseG9IMzJ0ZU1Oc1hEX3gxU0xCQXMtQzZHYW1YTFZCUSIsInJpZCI6IjhiY2Q3YjQ2LWIwZDEtNDEzNC05YjMyLTZkM2MxYzdkNmU3NSJ9.7JgajPE4xibTALh94uAPyDpHs_Un_V0CZq4EzrF7o5rrtpWk1_xT2qoU0omyBVnrYT7I85h2oJxEjzKZuo3sDw';
+
+function getTursoEndpoint() {
+  let url = process.env.TURSO_URL || process.env.TURSO_DATABASE_URL || DEFAULT_TURSO_URL;
+  url = url.replace(/^libsql:\/\//i, 'https://');
+  if (!url.endsWith('/v2/pipeline')) {
+    url = url.replace(/\/+$/, '') + '/v2/pipeline';
+  }
+  return url;
+}
+
+function getTursoToken() {
+  return process.env.TURSO_AUTH_TOKEN || process.env.TURSO_TOKEN || DEFAULT_TURSO_TOKEN;
+}
 
 async function queryTurso(sql, args = []) {
   const formattedArgs = args.map(a => ({ type: 'text', value: String(a) }));
 
-  const resp = await fetch(TURSO_URL, {
+  const resp = await fetch(getTursoEndpoint(), {
     method: 'POST',
     headers: {
-      'Authorization': 'Bearer ' + TURSO_TOKEN,
+      'Authorization': 'Bearer ' + getTursoToken(),
       'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     },
     body: JSON.stringify({
       requests: [{ type: 'execute', stmt: { sql, args: formattedArgs } }]
@@ -22,6 +35,10 @@ async function queryTurso(sql, args = []) {
   }
 
   const data = await resp.json();
+  if (data.results && data.results[0] && data.results[0].error) {
+    throw new Error(`Turso SQL Error: ${JSON.stringify(data.results[0].error)}`);
+  }
+
   const resObj = data.results && data.results[0] && data.results[0].response && data.results[0].response.result;
   if (!resObj) return { cols: [], rows: [] };
 
@@ -41,6 +58,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -82,39 +100,47 @@ export default async function handler(req, res) {
       created_at: row.created_at,
     }));
 
-    return res.status(200).json({
-      success: true,
-      query: q,
-      total: jobs.length,
-      jobs: jobs,
-    });
+    if (jobs.length > 0) {
+      return res.status(200).json({
+        success: true,
+        query: q,
+        total: jobs.length,
+        jobs: jobs,
+      });
+    }
   } catch (dbError) {
-    console.warn("Turso HTTP search error, trying Render fallback:", dbError);
+    console.warn("Turso search error, trying Render fallback:", dbError);
   }
 
   // Fallback to Render Go API
   try {
-    const fallbackResp = await fetch('https://job-search-api-go.onrender.com/jobs?limit=' + maxLimit, {
+    const fallbackResp = await fetch('https://job-search-api-go.onrender.com/jobs?q=' + encodeURIComponent(q) + '&limit=' + maxLimit, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
     });
     if (fallbackResp.ok) {
       const rawData = await fallbackResp.json();
       const rawJobs = Array.isArray(rawData) ? rawData : (rawData && Array.isArray(rawData.jobs) ? rawData.jobs : []);
-      let filtered = rawJobs;
-      if (q) {
-        const lowerQ = q.toLowerCase();
-        filtered = rawJobs.filter(j =>
-          (j.title && j.title.toLowerCase().includes(lowerQ)) ||
-          (j.company && j.company.toLowerCase().includes(lowerQ)) ||
-          (j.location && j.location.toLowerCase().includes(lowerQ))
-        );
+      if (rawJobs.length > 0) {
+        return res.status(200).json({
+          success: true,
+          query: q,
+          total: rawJobs.length,
+          fallback: 'render-go',
+          jobs: rawJobs.map(j => ({
+            id: j.id,
+            hash: j.hash || j.id,
+            title: j.title,
+            company: j.company,
+            location: j.location,
+            description: j.description,
+            url: j.url,
+            source: j.source,
+            role_category: Array.isArray(j.tags) ? j.tags.join(', ') : (j.role_category || j.tags || 'General Tech'),
+            score: Number(j.match_score || j.score || 0),
+            created_at: j.created_at || j.date || '',
+          })),
+        });
       }
-      return res.status(200).json({
-        success: true,
-        query: q,
-        total: filtered.length,
-        jobs: filtered,
-      });
     }
   } catch (fallbackError) {}
 
