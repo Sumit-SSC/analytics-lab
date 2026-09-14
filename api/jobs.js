@@ -1,26 +1,13 @@
-const DEFAULT_TURSO_URL = 'https://jobs-db-mitsu.aws-ap-south-1.turso.io/v2/pipeline';
-const DEFAULT_TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODcyOTA3NDUsImlkIjoiMDE5ZjhlZjUtN2MwMS03OTNhLWI4NWEtYmRkYzUxZjM1Mzk2Iiwia2lkIjoiNmNlY282ZndLZEdseG9IMzJ0ZU1Oc1hEX3gxU0xCQXMtQzZHYW1YTFZCUSIsInJpZCI6IjhiY2Q3YjQ2LWIwZDEtNDEzNC05YjMyLTZkM2MxYzdkNmU3NSJ9.7JgajPE4xibTALh94uAPyDpHs_Un_V0CZq4EzrF7o5rrtpWk1_xT2qoU0omyBVnrYT7I85h2oJxEjzKZuo3sDw';
-
-function getTursoEndpoint() {
-  let url = process.env.TURSO_URL || process.env.TURSO_DATABASE_URL || DEFAULT_TURSO_URL;
-  url = url.replace(/^libsql:\/\//i, 'https://');
-  if (!url.endsWith('/v2/pipeline')) {
-    url = url.replace(/\/+$/, '') + '/v2/pipeline';
-  }
-  return url;
-}
-
-function getTursoToken() {
-  return process.env.TURSO_AUTH_TOKEN || process.env.TURSO_TOKEN || DEFAULT_TURSO_TOKEN;
-}
+const TURSO_URL = 'https://jobs-db-mitsu.aws-ap-south-1.turso.io/v2/pipeline';
+const TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODcyOTA3NDUsImlkIjoiMDE5ZjhlZjUtN2MwMS03OTNhLWI4NWEtYmRkYzUxZjM1Mzk2Iiwia2lkIjoiNmNlY282ZndLZEdseG9IMzJ0ZU1Oc1hEX3gxU0xCQXMtQzZHYW1YTFZCUSIsInJpZCI6IjhiY2Q3YjQ2LWIwZDEtNDEzNC05YjMyLTZkM2MxYzdkNmU3NSJ9.7JgajPE4xibTALh94uAPyDpHs_Un_V0CZq4EzrF7o5rrtpWk1_xT2qoU0omyBVnrYT7I85h2oJxEjzKZuo3sDw';
 
 async function queryTurso(sql, args = []) {
   const formattedArgs = args.map(a => ({ type: 'text', value: String(a) }));
 
-  const resp = await fetch(getTursoEndpoint(), {
+  const resp = await fetch(TURSO_URL, {
     method: 'POST',
     headers: {
-      'Authorization': 'Bearer ' + getTursoToken(),
+      'Authorization': 'Bearer ' + TURSO_TOKEN,
       'Content-Type': 'application/json',
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     },
@@ -133,6 +120,7 @@ export default async function handler(req, res) {
     if (jobs.length > 0) {
       return res.status(200).json({
         success: true,
+        version: 'v2.1-direct-turso',
         totalInDb: totalCount || jobs.length,
         total: jobs.length,
         offset: skipOffset,
@@ -157,6 +145,7 @@ export default async function handler(req, res) {
       if (jobsList.length > 0) {
         return res.status(200).json({
           success: true,
+          version: 'v2.1-render-fallback',
           totalInDb: totalDb || jobsList.length,
           total: jobsList.length,
           offset: skipOffset,
@@ -187,6 +176,7 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     success: true,
+    version: 'v2.1-empty',
     totalInDb: totalCount || 0,
     total: 0,
     offset: skipOffset,
