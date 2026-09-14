@@ -1,4 +1,45 @@
-import { createClient } from '@libsql/client';
+const TURSO_URL = 'https://jobs-db-mitsu.aws-ap-south-1.turso.io/v2/pipeline';
+const TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODcyOTA3NDUsImlkIjoiMDE5ZjhlZjUtN2MwMS03OTNhLWI4NWEtYmRkYzUxZjM1Mzk2Iiwia2lkIjoiNmNlY282ZndLZEdseG9IMzJ0ZU1Oc1hEX3gxU0xCQXMtQzZHYW1YTFZCUSIsInJpZCI6IjhiY2Q3YjQ2LWIwZDEtNDEzNC05YjMyLTZkM2MxYzdkNmU3NSJ9.7JgajPE4xibTALh94uAPyDpHs_Un_V0CZq4EzrF7o5rrtpWk1_xT2qoU0omyBVnrYT7I85h2oJxEjzKZuo3sDw';
+
+async function queryTurso(sql, args = []) {
+  const formattedArgs = args.map(a => ({ type: 'text', value: String(a) }));
+
+  const resp = await fetch(TURSO_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + TURSO_TOKEN,
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    },
+    body: JSON.stringify({
+      requests: [{ type: 'execute', stmt: { sql, args: formattedArgs } }]
+    })
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '');
+    throw new Error(`Turso HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+  }
+
+  const data = await resp.json();
+  if (data.results && data.results[0] && data.results[0].error) {
+    throw new Error(`Turso SQL Error: ${JSON.stringify(data.results[0].error)}`);
+  }
+
+  const resObj = data.results && data.results[0] && data.results[0].response && data.results[0].response.result;
+  if (!resObj) return { cols: [], rows: [] };
+
+  const cols = (resObj.cols || []).map(c => c.name);
+  const rows = (resObj.rows || []).map(r => {
+    const obj = {};
+    cols.forEach((c, idx) => {
+      obj[c] = (r[idx] && r[idx].value !== undefined && r[idx].value !== null) ? r[idx].value : null;
+    });
+    return obj;
+  });
+
+  return { cols, rows };
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,115 +50,112 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  let dbUrl = process.env.TURSO_DATABASE_URL || process.env.DB_URL || 'https://jobs-db-mitsu.aws-ap-south-1.turso.io';
-  if (dbUrl.startsWith('turso://')) {
-    dbUrl = dbUrl.replace('turso://', 'https://');
-  } else if (dbUrl.startsWith('libsql://')) {
-    dbUrl = dbUrl.replace('libsql://', 'https://');
-  }
-  const authToken = process.env.TURSO_AUTH_TOKEN || process.env.DB_AUTH_TOKEN || '';
+  const urlObj = new URL(req.url || '/', 'http://localhost');
+  const location = (req.query && req.query.location) || urlObj.searchParams.get('location') || '';
+  const role = (req.query && req.query.role) || urlObj.searchParams.get('role') || '';
+  const limit = (req.query && req.query.limit) || urlObj.searchParams.get('limit') || '60';
+  const offset = (req.query && req.query.offset) || urlObj.searchParams.get('offset') || '0';
 
-  const { location = '', role = '', limit = '50', offset = '0' } = req.query;
-  const maxLimit = Math.min(parseInt(limit, 10) || 50, 500);
+  const maxLimit = Math.min(parseInt(limit, 10) || 60, 500);
   const skipOffset = Math.max(parseInt(offset, 10) || 0, 0);
 
-  if (authToken) {
+  let primaryError = null;
+  let countError = null;
+
+  try {
+    let totalCount = 0;
     try {
-      const client = createClient({
-        url: dbUrl,
-        authToken: authToken,
-      });
-
-      let totalCount = 0;
-      try {
-        const countRes = await client.execute({ sql: `SELECT COUNT(1) as cnt FROM jobs`, args: [] });
-        if (countRes.rows && countRes.rows.length > 0) {
-          totalCount = Number(countRes.rows[0].cnt);
-        }
-      } catch (e) {
-        console.warn("Could not fetch total count:", e);
+      const countRes = await queryTurso('SELECT COUNT(1) as cnt FROM unified_jobs');
+      if (countRes.rows && countRes.rows.length > 0) {
+        totalCount = Number(countRes.rows[0].cnt) || 0;
       }
-
-      let query = `SELECT id, hash, title, company, location, COALESCE(description, '') as description, url, source, role_category, score, COALESCE(created_at, '') as created_at FROM jobs WHERE 1=1`;
-      const args = [];
-
-      if (location && location !== 'all') {
-        query += ` AND (LOWER(location) LIKE ? OR LOWER(description) LIKE ?)`;
-        args.push(`%${location.toLowerCase()}%`, `%${location.toLowerCase()}%`);
-      }
-
-      if (role && role !== 'all') {
-        query += ` AND (LOWER(title) LIKE ? OR LOWER(role_category) LIKE ? OR LOWER(description) LIKE ?)`;
-        args.push(`%${role.toLowerCase()}%`, `%${role.toLowerCase()}%`, `%${role.toLowerCase()}%`);
-      }
-
-      query += ` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`;
-      args.push(maxLimit, skipOffset);
-
-      const result = await client.execute({ sql: query, args });
-
-      const jobs = result.rows.map(row => ({
-        id: row.id,
-        hash: row.hash,
-        title: row.title,
-        company: row.company,
-        location: row.location,
-        description: row.description,
-        url: row.url,
-        source: row.source,
-        role_category: row.role_category,
-        score: row.score,
-        created_at: row.created_at,
-      }));
-
-      // Sort by created_at descending (latest first)
-      jobs.sort((a, b) => {
-        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
-        if (dateB !== dateA) return dateB - dateA;
-        return (b.id || 0) - (a.id || 0);
-      });
-
-      return res.status(200).json({
-        success: true,
-        totalInDb: totalCount || jobs.length,
-        total: jobs.length,
-        offset: skipOffset,
-        jobs: jobs,
-      });
-    } catch (dbError) {
-      console.warn("Turso DB query error, falling back to Service 1 Go API:", dbError);
+    } catch (cntErr) {
+      countError = cntErr.message;
     }
+
+    let sql = `SELECT id, id as hash, title, company, location, COALESCE(description, '') as description, url, source, COALESCE(tags, '') as role_category, COALESCE(match_score, 0) as score, COALESCE(date, '') as created_at FROM unified_jobs WHERE 1=1`;
+    const args = [];
+
+    const locClean = String(location).trim().toLowerCase();
+    if (locClean && locClean !== 'all' && locClean !== 'undefined' && locClean !== 'null') {
+      sql += ` AND (LOWER(location) LIKE ? OR LOWER(title) LIKE ? OR LOWER(description) LIKE ?)`;
+      const locPattern = `%${locClean}%`;
+      args.push(locPattern, locPattern, locPattern);
+    }
+
+    const roleClean = String(role).trim().toLowerCase();
+    if (roleClean && roleClean !== 'all' && roleClean !== 'undefined' && roleClean !== 'null') {
+      sql += ` AND (LOWER(title) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(description) LIKE ?)`;
+      const rolePattern = `%${roleClean}%`;
+      args.push(rolePattern, rolePattern, rolePattern);
+    }
+
+    sql += ` ORDER BY COALESCE(date, id) DESC, id DESC LIMIT ${maxLimit} OFFSET ${skipOffset}`;
+
+    let result = await queryTurso(sql, args);
+
+    if ((!result.rows || result.rows.length === 0) && (locClean || roleClean)) {
+      result = await queryTurso(
+        `SELECT id, id as hash, title, company, location, COALESCE(description, '') as description, url, source, COALESCE(tags, '') as role_category, COALESCE(match_score, 0) as score, COALESCE(date, '') as created_at FROM unified_jobs ORDER BY COALESCE(date, id) DESC, id DESC LIMIT ${maxLimit} OFFSET ${skipOffset}`
+      );
+    }
+
+    const jobs = (result.rows || []).map(row => ({
+      id: row.id,
+      hash: row.hash || row.id,
+      title: row.title,
+      company: row.company,
+      location: row.location,
+      description: row.description,
+      url: row.url,
+      source: row.source,
+      role_category: row.role_category,
+      score: Number(row.score) || 0,
+      created_at: row.created_at,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      totalInDb: totalCount || jobs.length,
+      total: jobs.length,
+      offset: skipOffset,
+      count_error: countError || undefined,
+      jobs: jobs,
+    });
+  } catch (dbError) {
+    primaryError = dbError.stack || dbError.message;
+    console.warn("Turso DB Primary err:", dbError);
   }
 
-  // Fallback to Service 1 Go Master API on Koyeb
+  // Fallback to Render Go API
   try {
-    const fallbackResp = await fetch('https://typical-diana-mitsu96-df9a3fcc.koyeb.app/api/jobs?limit=' + maxLimit);
+    const fallbackResp = await fetch('https://job-search-api-go.onrender.com/jobs?limit=' + maxLimit, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
     if (fallbackResp.ok) {
-      const rawJobs = await fallbackResp.json();
-      let jobsList = Array.isArray(rawJobs) ? rawJobs : [];
-      jobsList.sort((a, b) => {
-        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return dateB - dateA;
-      });
+      const rawData = await fallbackResp.json();
+      const jobsList = Array.isArray(rawData) ? rawData : (rawData && Array.isArray(rawData.jobs) ? rawData.jobs : []);
+      const totalDb = (rawData && (rawData.total || rawData.totalInDb || rawData.count)) || jobsList.length;
+
       return res.status(200).json({
         success: true,
-        totalInDb: jobsList.length,
+        totalInDb: totalDb || jobsList.length,
         total: jobsList.length,
         offset: skipOffset,
+        primary_error: primaryError,
+        fallback: 'render-go',
         jobs: jobsList,
       });
     }
-  } catch (fallbackError) {
-    console.error("Fallback error:", fallbackError);
-  }
+  } catch (fallbackErr) {}
 
   return res.status(200).json({
     success: true,
     totalInDb: 0,
     total: 0,
     offset: skipOffset,
+    primary_error: primaryError,
+    count_error: countError,
     jobs: [],
   });
 }
