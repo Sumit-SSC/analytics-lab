@@ -9,6 +9,7 @@ function httpsPost(urlStr, headers, bodyObj) {
     const parsedUrl = new URL(urlStr);
     const req = https.request({
       hostname: parsedUrl.hostname,
+      port: 443,
       path: parsedUrl.pathname + parsedUrl.search,
       method: 'POST',
       headers: {
@@ -78,7 +79,7 @@ async function queryTurso(sql, args = []) {
   return { cols, rows };
 }
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -198,4 +199,4 @@ module.exports = async function handler(req, res) {
     count_error: countError,
     jobs: [],
   });
-};
+}
