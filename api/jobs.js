@@ -1,68 +1,27 @@
-const https = require('https');
-
 const TURSO_URL = 'https://jobs-db-mitsu.aws-ap-south-1.turso.io/v2/pipeline';
 const TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODcyOTA3NDUsImlkIjoiMDE5ZjhlZjUtN2MwMS03OTNhLWI4NWEtYmRkYzUxZjM1Mzk2Iiwia2lkIjoiNmNlY282ZndLZEdseG9IMzJ0ZU1Oc1hEX3gxU0xCQXMtQzZHYW1YTFZCUSIsInJpZCI6IjhiY2Q3YjQ2LWIwZDEtNDEzNC05YjMyLTZkM2MxYzdkNmU3NSJ9.7JgajPE4xibTALh94uAPyDpHs_Un_V0CZq4EzrF7o5rrtpWk1_xT2qoU0omyBVnrYT7I85h2oJxEjzKZuo3sDw';
 
-function httpsPost(urlStr, headers, bodyObj) {
-  return new Promise((resolve, reject) => {
-    const postData = JSON.stringify(bodyObj);
-    const parsedUrl = new URL(urlStr);
-    const req = https.request({
-      hostname: parsedUrl.hostname,
-      port: 443,
-      path: parsedUrl.pathname + parsedUrl.search,
-      method: 'POST',
-      headers: {
-        ...headers,
-        'Content-Length': Buffer.byteLength(postData)
-      },
-      timeout: 8000
-    }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
-        } else {
-          reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`));
-        }
-      });
-    });
-    req.on('timeout', () => { req.destroy(new Error('Turso HTTPS POST Timeout (8s)')); });
-    req.on('error', reject);
-    req.write(postData);
-    req.end();
-  });
-}
-
-function httpsGet(urlStr, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const req = https.get(urlStr, { headers, timeout: 8000 }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
-        } else {
-          reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`));
-        }
-      });
-    });
-    req.on('timeout', () => { req.destroy(new Error('Render HTTPS GET Timeout (8s)')); });
-    req.on('error', reject);
-  });
-}
-
 async function queryTurso(sql, args = []) {
   const formattedArgs = args.map(a => ({ type: 'text', value: String(a) }));
-  const data = await httpsPost(TURSO_URL, {
-    'Authorization': 'Bearer ' + TURSO_TOKEN,
-    'Content-Type': 'application/json',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-  }, {
-    requests: [{ type: 'execute', stmt: { sql, args: formattedArgs } }]
+
+  const resp = await fetch(TURSO_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + TURSO_TOKEN,
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    },
+    body: JSON.stringify({
+      requests: [{ type: 'execute', stmt: { sql, args: formattedArgs } }]
+    })
   });
 
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '');
+    throw new Error(`Turso HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+  }
+
+  const data = await resp.json();
   if (data.results && data.results[0] && data.results[0].error) {
     throw new Error(`Turso SQL Error: ${JSON.stringify(data.results[0].error)}`);
   }
@@ -174,23 +133,28 @@ export default async function handler(req, res) {
 
   // Fallback to Render Go API when Turso returns 0 jobs or errors out
   try {
-    const rawData = await httpsGet('https://job-search-api-go.onrender.com/jobs?limit=' + maxLimit, {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+    const renderResp = await fetch('https://job-search-api-go.onrender.com/jobs?limit=' + maxLimit, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
     });
-    const jobsList = Array.isArray(rawData) ? rawData : (rawData && Array.isArray(rawData.jobs) ? rawData.jobs : []);
-    const totalDb = (rawData && (rawData.total || rawData.totalInDb || rawData.count)) || jobsList.length;
+    if (renderResp.ok) {
+      const rawData = await renderResp.json();
+      const jobsList = Array.isArray(rawData) ? rawData : (rawData && Array.isArray(rawData.jobs) ? rawData.jobs : []);
+      const totalDb = (rawData && (rawData.total || rawData.totalInDb || rawData.count)) || jobsList.length;
 
-    if (jobsList.length > 0) {
-      return res.status(200).json({
-        success: true,
-        totalInDb: totalDb || jobsList.length,
-        total: jobsList.length,
-        offset: skipOffset,
-        primary_error: primaryError || undefined,
-        count_error: countError || undefined,
-        fallback: 'render-go',
-        jobs: jobsList,
-      });
+      if (jobsList.length > 0) {
+        return res.status(200).json({
+          success: true,
+          totalInDb: totalDb || jobsList.length,
+          total: jobsList.length,
+          offset: skipOffset,
+          primary_error: primaryError || undefined,
+          count_error: countError || undefined,
+          fallback: 'render-go',
+          jobs: jobsList,
+        });
+      }
+    } else {
+      fallbackError = `Render HTTP ${renderResp.status}`;
     }
   } catch (fallbackErr) {
     fallbackError = String(fallbackErr.message || fallbackErr);
