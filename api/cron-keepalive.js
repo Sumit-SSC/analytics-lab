@@ -41,8 +41,10 @@ export default async function handler(req) {
   const hourIST = parseInt(hourStr, 10);
   const minIST = parseInt(minStr, 10);
 
-  // Operational Window: 06:00 AM IST to 12:00 AM IST (00:00 IST) -> hours 6 through 23.
-  const isOperationalWindow = hourIST >= 6;
+  // Operational Window: 06:00 AM IST to 11:45 PM IST (23:45 IST)
+  // Morning Wakeup Window: 05:25 AM IST to 05:59 AM IST (wakes up Koyeb/Render for 06:00 IST start)
+  const isWakeupWindow = (hourIST === 5 && minIST >= 25);
+  const isOperationalWindow = (hourIST >= 6 && hourIST < 23) || (hourIST === 23 && minIST < 45) || isWakeupWindow;
   const nowISTStr = `${hourStr.padStart(2, '0')}:${minStr.padStart(2, '0')}`;
 
   if (!isOperationalWindow) {
