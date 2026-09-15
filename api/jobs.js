@@ -1,13 +1,28 @@
-const TURSO_URL = 'https://jobs-db-mitsu.aws-ap-south-1.turso.io/v2/pipeline';
-const TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODcyOTA3NDUsImlkIjoiMDE5ZjhlZjUtN2MwMS03OTNhLWI4NWEtYmRkYzUxZjM1Mzk2Iiwia2lkIjoiNmNlY282ZndLZEdseG9IMzJ0ZU1Oc1hEX3gxU0xCQXMtQzZHYW1YTFZCUSIsInJpZCI6IjhiY2Q3YjQ2LWIwZDEtNDEzNC05YjMyLTZkM2MxYzdkNmU3NSJ9.7JgajPE4xibTALh94uAPyDpHs_Un_V0CZq4EzrF7o5rrtpWk1_xT2qoU0omyBVnrYT7I85h2oJxEjzKZuo3sDw';
+function getTursoEndpoint() {
+  let url = process.env.TURSO_URL || process.env.TURSO_DATABASE_URL || 'https://jobs-db-mitsu.aws-ap-south-1.turso.io/v2/pipeline';
+  url = url.replace(/^libsql:\/\//i, 'https://');
+  if (!url.endsWith('/v2/pipeline')) {
+    url = url.replace(/\/+$/, '') + '/v2/pipeline';
+  }
+  return url;
+}
+
+function getTursoToken() {
+  return (process.env.TURSO_AUTH_TOKEN || process.env.DB_AUTH_TOKEN || process.env.TURSO_TOKEN || '').trim();
+}
 
 async function queryTurso(sql, args = []) {
+  const token = getTursoToken();
+  if (!token) {
+    throw new Error("Missing Turso auth token in environment variables");
+  }
+
   const formattedArgs = args.map(a => ({ type: 'text', value: String(a) }));
 
-  const resp = await fetch(TURSO_URL, {
+  const resp = await fetch(getTursoEndpoint(), {
     method: 'POST',
     headers: {
-      'Authorization': 'Bearer ' + TURSO_TOKEN,
+      'Authorization': 'Bearer ' + token,
       'Content-Type': 'application/json',
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     },
@@ -88,9 +103,14 @@ export default async function handler(req, res) {
 
     const roleClean = String(role).trim().toLowerCase();
     if (roleClean && roleClean !== 'all' && roleClean !== 'undefined' && roleClean !== 'null') {
-      sql += ` AND (LOWER(title) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(description) LIKE ?)`;
-      const rolePattern = `%${roleClean}%`;
-      args.push(rolePattern, rolePattern, rolePattern);
+      if (roleClean.includes('analyst') || roleClean.includes('data_analyst')) {
+        sql += ` AND (LOWER(title) LIKE ? OR LOWER(title) LIKE ? OR LOWER(title) LIKE ? OR LOWER(title) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(description) LIKE ?)`;
+        args.push('%data analyst%', '%business analyst%', '%bi engineer%', '%analytics engineer%', '%analyst%', '%data analyst%');
+      } else {
+        sql += ` AND (LOWER(title) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(description) LIKE ?)`;
+        const rolePattern = `%${roleClean}%`;
+        args.push(rolePattern, rolePattern, rolePattern);
+      }
     }
 
     sql += ` ORDER BY COALESCE(date, id) DESC, id DESC LIMIT ${maxLimit} OFFSET ${skipOffset}`;
@@ -120,7 +140,6 @@ export default async function handler(req, res) {
     if (jobs.length > 0) {
       return res.status(200).json({
         success: true,
-        version: 'v2.2-turso-ok',
         totalInDb: totalCount || jobs.length,
         total: jobs.length,
         offset: skipOffset,
@@ -145,12 +164,11 @@ export default async function handler(req, res) {
       if (jobsList.length > 0) {
         return res.status(200).json({
           success: true,
-          version: 'v2.2-render-fallback',
           totalInDb: totalDb || jobsList.length,
           total: jobsList.length,
           offset: skipOffset,
-          primary_error: primaryError || 'None',
-          count_error: countError || 'None',
+          primary_error: primaryError || undefined,
+          count_error: countError || undefined,
           fallback: 'render-go',
           jobs: jobsList.map(j => ({
             id: j.id,
@@ -176,13 +194,12 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     success: true,
-    version: 'v2.2-diag-empty',
     totalInDb: totalCount || 0,
     total: 0,
     offset: skipOffset,
-    primary_error: primaryError || 'None',
-    count_error: countError || 'None',
-    fallback_error: fallbackError || 'None',
+    primary_error: primaryError || 'No primary error reported',
+    count_error: countError || 'No count error reported',
+    fallback_error: fallbackError || 'No fallback error reported',
     jobs: [],
   });
 }

@@ -1,8 +1,5 @@
-const DEFAULT_TURSO_URL = 'https://jobs-db-mitsu.aws-ap-south-1.turso.io/v2/pipeline';
-const DEFAULT_TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODcyOTA3NDUsImlkIjoiMDE5ZjhlZjUtN2MwMS03OTNhLWI4NWEtYmRkYzUxZjM1Mzk2Iiwia2lkIjoiNmNlY282ZndLZEdseG9IMzJ0ZU1Oc1hEX3gxU0xCQXMtQzZHYW1YTFZCUSIsInJpZCI6IjhiY2Q3YjQ2LWIwZDEtNDEzNC05YjMyLTZkM2MxYzdkNmU3NSJ9.7JgajPE4xibTALh94uAPyDpHs_Un_V0CZq4EzrF7o5rrtpWk1_xT2qoU0omyBVnrYT7I85h2oJxEjzKZuo3sDw';
-
 function getTursoEndpoint() {
-  let url = process.env.TURSO_URL || process.env.TURSO_DATABASE_URL || DEFAULT_TURSO_URL;
+  let url = process.env.TURSO_URL || process.env.TURSO_DATABASE_URL || 'https://jobs-db-mitsu.aws-ap-south-1.turso.io/v2/pipeline';
   url = url.replace(/^libsql:\/\//i, 'https://');
   if (!url.endsWith('/v2/pipeline')) {
     url = url.replace(/\/+$/, '') + '/v2/pipeline';
@@ -11,16 +8,21 @@ function getTursoEndpoint() {
 }
 
 function getTursoToken() {
-  return process.env.TURSO_AUTH_TOKEN || process.env.TURSO_TOKEN || DEFAULT_TURSO_TOKEN;
+  return (process.env.TURSO_AUTH_TOKEN || process.env.DB_AUTH_TOKEN || process.env.TURSO_TOKEN || '').trim();
 }
 
 async function queryTurso(sql, args = []) {
+  const token = getTursoToken();
+  if (!token) {
+    throw new Error("Missing Turso auth token in environment variables");
+  }
+
   const formattedArgs = args.map(a => ({ type: 'text', value: String(a) }));
 
   const resp = await fetch(getTursoEndpoint(), {
     method: 'POST',
     headers: {
-      'Authorization': 'Bearer ' + getTursoToken(),
+      'Authorization': 'Bearer ' + token,
       'Content-Type': 'application/json',
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     },
@@ -77,9 +79,14 @@ export default async function handler(req, res) {
 
     const qClean = String(q).trim().toLowerCase();
     if (qClean && qClean !== 'undefined' && qClean !== 'null') {
-      const pattern = `%${qClean}%`;
-      sql += ` AND (LOWER(title) LIKE ? OR LOWER(company) LIKE ? OR LOWER(location) LIKE ? OR LOWER(description) LIKE ?)`;
-      args.push(pattern, pattern, pattern, pattern);
+      if (qClean.includes('analyst') || qClean.includes('data analyst')) {
+        sql += ` AND (LOWER(title) LIKE ? OR LOWER(title) LIKE ? OR LOWER(title) LIKE ? OR LOWER(company) LIKE ? OR LOWER(location) LIKE ? OR LOWER(description) LIKE ?)`;
+        args.push('%data analyst%', '%business analyst%', '%bi engineer%', `%${qClean}%`, `%${qClean}%`, `%${qClean}%`);
+      } else {
+        const pattern = `%${qClean}%`;
+        sql += ` AND (LOWER(title) LIKE ? OR LOWER(company) LIKE ? OR LOWER(location) LIKE ? OR LOWER(description) LIKE ?)`;
+        args.push(pattern, pattern, pattern, pattern);
+      }
     }
 
     sql += ` ORDER BY COALESCE(date, id) DESC, id DESC LIMIT ${maxLimit} OFFSET ${skipOffset}`;
