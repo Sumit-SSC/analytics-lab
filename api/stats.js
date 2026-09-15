@@ -1,5 +1,15 @@
-const TURSO_URL = 'https://jobs-db-mitsu.aws-ap-south-1.turso.io/v2/pipeline';
-const TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODcyOTA3NDUsImlkIjoiMDE5ZjhlZjUtN2MwMS03OTNhLWI4NWEtYmRkYzUxZjM1Mzk2Iiwia2lkIjoiNmNlY282ZndLZEdseG9IMzJ0ZU1Oc1hEX3gxU0xCQXMtQzZHYW1YTFZCUSIsInJpZCI6IjhiY2Q3YjQ2LWIwZDEtNDEzNC05YjMyLTZkM2MxYzdkNmU3NSJ9.7JgajPE4xibTALh94uAPyDpHs_Un_V0CZq4EzrF7o5rrtpWk1_xT2qoU0omyBVnrYT7I85h2oJxEjzKZuo3sDw';
+function getTursoEndpoint() {
+  let url = process.env.TURSO_URL || process.env.TURSO_DATABASE_URL || 'https://jobs-db-mitsu.aws-ap-south-1.turso.io/v2/pipeline';
+  url = url.replace(/^libsql:\/\//i, 'https://');
+  if (!url.endsWith('/v2/pipeline')) {
+    url = url.replace(/\/+$/, '') + '/v2/pipeline';
+  }
+  return url;
+}
+
+function getTursoToken() {
+  return (process.env.TURSO_AUTH_TOKEN || process.env.DB_AUTH_TOKEN || process.env.TURSO_TOKEN || '').trim();
+}
 
 const defaultStats = {
   total_jobs: 24199,
@@ -21,17 +31,22 @@ const defaultStats = {
 };
 
 async function queryTurso(sql, args = []) {
+  const token = getTursoToken();
+  if (!token) {
+    throw new Error("Missing Turso auth token in environment variables");
+  }
+
   const formattedArgs = args.map(a => {
     if (typeof a === 'number') return { type: 'integer', value: String(a) };
     return { type: 'text', value: String(a) };
   });
 
-  const resp = await fetch(TURSO_URL, {
+  const resp = await fetch(getTursoEndpoint(), {
     method: 'POST',
     headers: {
-      'Authorization': 'Bearer ' + TURSO_TOKEN,
+      'Authorization': 'Bearer ' + token,
       'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     },
     body: JSON.stringify({
       requests: [{ type: 'execute', stmt: { sql, args: formattedArgs } }]
@@ -63,38 +78,37 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
   try {
-    const totalJobsRes = await queryTurso('SELECT COUNT(1) as total FROM unified_jobs');
-    const totalJobs = (totalJobsRes.rows && totalJobsRes.rows[0]) ? Number(totalJobsRes.rows[0].total) : defaultStats.total_jobs;
+    const cntRes = await queryTurso('SELECT COUNT(1) as cnt FROM unified_jobs');
+    const totalJobs = (cntRes.rows && cntRes.rows.length > 0) ? Number(cntRes.rows[0].cnt) : 24199;
 
-    const sourcesRes = await queryTurso('SELECT source, COUNT(1) as count FROM unified_jobs GROUP BY source ORDER BY count DESC LIMIT 10');
-    let sources = (sourcesRes.rows || []).map(r => ({ source: String(r.source), count: Number(r.count) }));
-    if (!sources || sources.length === 0) {
-      sources = defaultStats.top_sources;
-    }
+    const sourcesRes = await queryTurso('SELECT source, COUNT(1) as cnt FROM unified_jobs GROUP BY source ORDER BY cnt DESC LIMIT 6');
+    const topSources = (sourcesRes.rows || []).map(r => ({
+      source: r.source || 'Direct API',
+      count: Number(r.cnt) || 0
+    }));
 
     return res.status(200).json({
       success: true,
-      service: 'service-3-vercel-hub',
-      timestamp: new Date().toISOString(),
-      stats: {
-        total_jobs: Number(totalJobs),
-        top_sources: sources,
-        status: 'ONLINE 🟢',
-      },
+      total_jobs: totalJobs,
+      top_sources: topSources.length > 0 ? topSources : defaultStats.top_sources,
+      top_categories: defaultStats.top_categories,
+      status: 'ONLINE 🟢',
+      timestamp: new Date().toISOString()
     });
   } catch (err) {
-    console.warn("Turso DB stats error, using defaultStats:", err);
+    console.warn("Turso stats error, returning cached default stats:", err);
     return res.status(200).json({
       success: true,
-      service: 'service-3-vercel-hub',
-      timestamp: new Date().toISOString(),
-      stats: defaultStats,
+      ...defaultStats,
+      fallback: 'render-go',
+      timestamp: new Date().toISOString()
     });
   }
 }
