@@ -82,8 +82,8 @@ export default async function handler(req) {
     'https://typical-diana-mitsu96-df9a3fcc.koyeb.app/api/health'
   ];
   const s2Urls = [
-    process.env.SERVICE_2_URL || 'https://job-search-api-go.onrender.com/health',
-    'https://tg-jobs-engine.onrender.com/health'
+    process.env.SERVICE_2_URL || 'https://tg-jobs-engine.vercel.app/api/health',
+    'https://tg-jobs-engine.vercel.app/api/cron-keepalive'
   ];
 
   let s1Status = 'UNKNOWN';

@@ -639,7 +639,7 @@
 		if (typeof window !== 'undefined' && window.JOB_SEARCH_API_BASE) {
 			return String(window.JOB_SEARCH_API_BASE).replace(/\/$/, '');
 		}
-		return 'https://job-search-api-go.onrender.com';
+		return 'https://typical-diana-mitsu96-df9a3fcc.koyeb.app';
 	}
 	function proxyUrlLooksLikeJobSearchApi(proxyUrl) {
 		if (!proxyUrl) return false;
@@ -668,7 +668,7 @@
 		function updateApiBackend(backend) {
 			if (backend === 'koyeb') {
 				window.JOB_PROXY_URL = getJobSearchApiBase();
-				if (statusEl) statusEl.textContent = '✓ Render Backend';
+				if (statusEl) statusEl.textContent = '✓ Koyeb Backend';
 			} else if (backend === 'rssjobs') {
 				window.JOB_PROXY_URL = getJobSearchApiBase();
 				if (statusEl) statusEl.textContent = '✓ RSSJobs (Direct)';
@@ -803,7 +803,9 @@
 	var EMBED_LOAD_TIMEOUT_MS = 8000;
 	var EMBED_BANNER_DISMISS_KEY = 'jobs_embed_banner_dismissed';
 	function getJobSearchApiEmbedUrl() {
-		return 'https://job-search-api-go.onrender.com/ui/';
+		var proxyUrl = (typeof window !== 'undefined' && window.JOB_PROXY_URL) ? String(window.JOB_PROXY_URL).replace(/\/$/, '') : '';
+		if (proxyUrl && proxyUrl.indexOf('http') === 0) return proxyUrl + '/swagger/';
+		return getJobSearchApiBase() + '/swagger/';
 	}
 	function setupRailwayUiEmbedToggle() {
 		var fallbackLink = document.getElementById('railway-ui-embed-fallback-link');
