@@ -119,9 +119,9 @@ export default async function handler(req, res) {
     console.warn("Turso search error, trying Render fallback:", dbError);
   }
 
-  // Fallback to Render Go API
+  // Fallback to Koyeb Go API
   try {
-    const fallbackResp = await fetch('https://job-search-api-go.onrender.com/jobs?q=' + encodeURIComponent(q) + '&limit=' + maxLimit, {
+    const fallbackResp = await fetch('https://typical-diana-mitsu96-df9a3fcc.koyeb.app/jobs?q=' + encodeURIComponent(q) + '&limit=' + maxLimit, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
     });
     if (fallbackResp.ok) {

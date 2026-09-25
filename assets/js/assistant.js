@@ -351,7 +351,7 @@
 	}
 
 	function fetchBackendChat(historyTurns) {
-		var base = (typeof window !== 'undefined' && window.JOB_PROXY_URL) ? String(window.JOB_PROXY_URL).replace(/\/$/, '') : 'https://job-search-engine-api.onrender.com';
+		var base = (typeof window !== 'undefined' && window.JOB_PROXY_URL) ? String(window.JOB_PROXY_URL).replace(/\/$/, '') : 'https://typical-diana-mitsu96-df9a3fcc.koyeb.app';
 		return fetch(base + '/api/v1/chat', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
