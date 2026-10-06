@@ -41,14 +41,14 @@ export default async function handler(req) {
   const hourIST = parseInt(hourStr, 10);
   const minIST = parseInt(minStr, 10);
 
-  // Operational Window: 06:00 AM IST to 11:45 PM IST (23:45 IST)
-  // Morning Wakeup Window: 05:25 AM IST to 05:59 AM IST (wakes up Koyeb/Render for 06:00 IST start)
-  const isWakeupWindow = (hourIST === 5 && minIST >= 25);
-  const isOperationalWindow = (hourIST >= 6 && hourIST < 23) || (hourIST === 23 && minIST < 45) || isWakeupWindow;
+  // Operational Window: 06:00 AM IST to 11:00 PM IST (23:00 IST)
+  // Morning Pre-wake Window: 05:45 AM IST to 05:59 AM IST (wakes up Koyeb/Render for 06:00 IST start)
+  const isPreWakeWindow = (hourIST === 5 && minIST >= 45);
+  const isOperationalWindow = (hourIST >= 6 && hourIST < 23) || (hourIST === 23 && minIST === 0) || isPreWakeWindow;
   const nowISTStr = `${hourStr.padStart(2, '0')}:${minStr.padStart(2, '0')}`;
 
   if (!isOperationalWindow) {
-    const nightMsg = `🌙 [NIGHT_REST_SKIP] Keep-Alive skipped at ${nowISTStr} IST (Operational window: 06:00 AM - 12:00 AM IST). Services resting.`;
+    const nightMsg = `🌙 [NIGHT_REST_SKIP] Keep-Alive skipped at ${nowISTStr} IST (Operational window: 06:00 AM - 11:00 PM IST). Services resting to save Render free tier hours.`;
     console.log(nightMsg);
 
     if (client) {
